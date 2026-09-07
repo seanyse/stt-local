@@ -18,6 +18,11 @@ struct WisprLocalApp: App {
         }
         .defaultSize(width: 720, height: 520)
 
+        Window("Diagnostics", id: "diagnostics") {
+            DiagnosticsView().environmentObject(delegate.state)
+        }
+        .defaultSize(width: 680, height: 620)
+
         Settings {
             SettingsView().environmentObject(delegate.state)
         }
@@ -46,6 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         state.backend.onResult = { [state] entry in
             state.history.append(entry)
         }
+        state.backend.log("[app] launch: bundle \(Bundle.main.bundlePath) accessibility \(AXIsProcessTrusted()) postEvents \(CGPreflightPostEventAccess()) listen \(CGPreflightListenEventAccess()) signature: \(DiagnosticsProbe.signingInfo().text)")
         state.backend.start()
         installHotkey()
         if !state.accessibilityGranted {
@@ -113,15 +119,15 @@ struct MenuContent: View {
     var body: some View {
         Text(statusText)
         if !state.accessibilityGranted {
-            Button("Grant Accessibility access…") {
-                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
-            }
+            Button("⚠︎ Accessibility not granted – open Diagnostics") { NSApp.activate(ignoringOtherApps: true); openWindow(id: "diagnostics") }
         }
         Divider()
         Button("History") { NSApp.activate(ignoringOtherApps: true); openWindow(id: "history") }
             .keyboardShortcut("h")
         SettingsLink { Text("Settings…") }
             .keyboardShortcut(",")
+        Button("Diagnostics") { NSApp.activate(ignoringOtherApps: true); openWindow(id: "diagnostics") }
+            .keyboardShortcut("d")
         Divider()
         Button("Restart engine") { state.backend.start() }
         Button("Open logs folder") { NSWorkspace.shared.open(AppConfig.logsDir) }

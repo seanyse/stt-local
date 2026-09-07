@@ -13,7 +13,15 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/WisprLocal"
 sed -e "s|__PYTHON__|$ROOT/.venv/bin/python|" -e "s|__BACKEND__|$ROOT|" Info.plist > "$APP/Contents/Info.plist"
 [ -f AppIcon.icns ] && cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-codesign --force --deep --sign - "$APP" 2>/dev/null || true
+# Sign with an Apple Development identity when one exists: its designated requirement
+# (team id + bundle id) is stable, so Accessibility/Microphone grants survive rebuilds.
+# Ad-hoc signatures change every build and macOS then treats the app as new.
+IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep -o '"Apple Development[^"]*"' | head -1 | tr -d '"')
+if [ -n "$IDENTITY" ]; then
+  codesign --force --deep --sign "$IDENTITY" "$APP" && echo "signed: $IDENTITY"
+else
+  codesign --force --deep --sign - "$APP" && echo "signed: ad-hoc (permissions reset on each rebuild)"
+fi
 echo "built: $(pwd)/$APP"
 
 # --install copies the bundle into /Applications (or ~/Applications if that is not writable).
