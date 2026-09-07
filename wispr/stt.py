@@ -61,22 +61,28 @@ class SpeechToText:
     def warmup(self) -> None:
         self.transcribe(np.zeros(self.sample_rate, dtype=np.float32))
 
-    def transcribe(self, audio: np.ndarray) -> str:
-        """audio: float32 mono at self.sample_rate."""
+    def transcribe(self, audio: np.ndarray, context: str | None = None) -> str:
+        """audio: float32 mono at self.sample_rate. `context`: text spoken just before this
+        audio (previous phrases of the same dictation); Whisper uses it as prompt so a phrase
+        that starts mid-sentence is decoded with the sentence in view."""
         if audio.size < self.sample_rate // 10:
             return ""
         try:
-            return self._transcribe(audio)
+            return self._transcribe(audio, context)
         finally:
             # MLX keeps freed buffers cached; give them back so the idle engine is mostly weights.
             mx.clear_cache()
 
-    def _transcribe(self, audio: np.ndarray) -> str:
+    def _transcribe(self, audio: np.ndarray, context: str | None = None) -> str:
         if self.engine == "whisper":
             import mlx_whisper
 
+            prompt = self.prompt
+            if context:
+                tail = " ".join(context.split()[-60:])  # last ~60 words is plenty of context
+                prompt = f"{prompt} {tail}" if prompt else tail
             out = mlx_whisper.transcribe(
-                audio.astype(np.float32), path_or_hf_repo=self.model_id, initial_prompt=self.prompt,
+                audio.astype(np.float32), path_or_hf_repo=self.model_id, initial_prompt=prompt,
                 language=self.language, condition_on_previous_text=False, temperature=0.0, fp16=True,
             )
             parts = []

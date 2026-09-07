@@ -29,26 +29,39 @@ def log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
-def _find_pause_cut(seg: np.ndarray, sr: int, min_len: int, pause_s: float = 0.6, hop_s: float = 0.05) -> int | None:
-    """Sample index in `seg` at the middle of the last >= pause_s quiet stretch that starts
-    after min_len samples, or None. Quiet = frame RMS below ~2.5x the noise floor."""
+def _find_pause_cut(seg: np.ndarray, sr: int, min_len: int, pause_s: float = 1.0, hop_s: float = 0.05,
+                    resume_s: float = 0.4) -> int | None:
+    """Sample index in `seg` at the middle of the last quiet stretch of >= pause_s that starts
+    after min_len samples AND is followed by >= resume_s of speech (so it is a real gap between
+    phrases, not a hesitation still in progress). Accuracy note: cutting inside a sentence
+    costs far more than the latency saved, so the defaults are deliberately conservative."""
     hop = int(hop_s * sr)
     n = len(seg) // hop
     if n < 4:
         return None
     frames = seg[: n * hop].reshape(n, hop)
     rms = np.sqrt(np.mean(frames**2, axis=1))
-    thresh = max(0.0035, 2.5 * float(np.percentile(rms, 20)))
+    floor = float(np.percentile(rms, 10))
+    loud = float(np.percentile(rms, 90))
+    thresh = max(0.0025, min(3.0 * floor, 0.15 * loud))
     quiet = rms < thresh
     need = int(pause_s / hop_s)
+    resume = int(resume_s / hop_s)
     best = None
-    run = 0
-    for i, q in enumerate(quiet):
-        run = run + 1 if q else 0
-        if run >= need:
-            start = (i - run + 1) * hop
-            if start >= min_len:
-                best = start + (run * hop) // 2
+    i = 0
+    while i < n:
+        if not quiet[i]:
+            i += 1
+            continue
+        j = i
+        while j < n and quiet[j]:
+            j += 1
+        run = j - i
+        if run >= need and i * hop >= min_len:
+            after = quiet[j : j + resume]
+            if len(after) >= resume and not after.any():
+                best = (i + run // 2) * hop
+        i = j
     return best
 
 
@@ -111,7 +124,7 @@ class Engine:
         """Every 250 ms, look at the audio captured so far; whenever a phrase has ended
         (>= 0.6 s pause) hand it to the worker. Also cuts at 25 s if the speaker never pauses."""
         sr = self.cfg.sample_rate
-        min_len, max_len = 3 * sr, 25 * sr
+        min_len, max_len = 8 * sr, 28 * sr
         while True:
             time.sleep(0.25)
             with self._seg_lock:
@@ -171,7 +184,7 @@ class Engine:
             try:
                 if kind == "segment":
                     t = time.perf_counter()
-                    text = "" if is_silent(payload) else self.stt.transcribe(payload)
+                    text = "" if is_silent(payload) else self.stt.transcribe(payload, context=" ".join(self._segments))
                     self._seg_ms += (time.perf_counter() - t) * 1000
                     if text:
                         self._segments.append(text)
@@ -212,7 +225,7 @@ class Engine:
             self.on_dropped("silent" if seconds >= 0.3 else "too short")
             return
         t0 = time.perf_counter()
-        tail_text = "" if is_silent(tail) else self.stt.transcribe(tail)
+        tail_text = "" if is_silent(tail) else self.stt.transcribe(tail, context=" ".join(self._segments))
         t_stt = time.perf_counter() - t0
         raw = " ".join(self._segments + ([tail_text] if tail_text else [])).strip()
         if self._segments:

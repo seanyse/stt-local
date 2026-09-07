@@ -46,9 +46,9 @@ struct SettingsView: View {
             }
             Section("Speech to text") {
                 Picker("Model", selection: $sttModel) {
-                    Text("Whisper turbo 4-bit – 0.6 GB, best on names/jargon").tag("mlx-community/whisper-large-v3-turbo-4bit")
-                    Text("Whisper turbo 8-bit – 0.9 GB").tag("mlx-community/whisper-large-v3-turbo-8bit")
-                    Text("Whisper turbo fp16 – 1.6 GB").tag("mlx-community/whisper-large-v3-turbo")
+                    Text("Whisper turbo fp16 – 1.7 GB, most accurate").tag("mlx-community/whisper-large-v3-turbo")
+                    Text("Whisper turbo 8-bit – 0.9 GB, near-identical").tag("mlx-community/whisper-large-v3-turbo-8bit")
+                    Text("Whisper turbo 4-bit – 0.6 GB, near-identical").tag("mlx-community/whisper-large-v3-turbo-4bit")
                     Text("Parakeet v3 8-bit – 0.8 GB, fastest, weaker on jargon").tag("mlx-community/parakeet-tdt-0.6b-v3")
                     Text("Parakeet v2 8-bit – English only").tag("mlx-community/parakeet-tdt-0.6b-v2")
                 }
@@ -142,7 +142,7 @@ struct SettingsView: View {
 
     private func loadFields() {
         let c = state.config
-        sttModel = c.string("stt_model", "mlx-community/whisper-large-v3-turbo-4bit")
+        sttModel = c.string("stt_model", "mlx-community/whisper-large-v3-turbo")
         language = c.string("language", "en")
         segmentWhileRecording = c.bool("segment_while_recording", true)
         formatter = c.string("formatter", "none")

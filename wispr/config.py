@@ -23,10 +23,10 @@ class Config:
     # time you release it (Whisper was ~0.5 s slower after a few seconds of idle).
     warm_on_start: bool = True
 
-    # Whisper turbo 4-bit: 0.6 GB, ~0.8 s per phrase, best on names/jargon, prompted with
-    # `vocabulary`. "mlx-community/parakeet-tdt-0.6b-v3" (8-bit): 0.8 GB, ~20 ms per second
-    # of audio, mishears jargon more often.
-    stt_model: str = "mlx-community/whisper-large-v3-turbo-4bit"
+    # Whisper turbo fp16 (1.7 GB) was the most accurate on real recordings, ahead of the full
+    # large-v3 and Parakeet. "-8bit" (0.9 GB) and "-4bit" (0.6 GB) gave near-identical text;
+    # "mlx-community/parakeet-tdt-0.6b-v3" (8-bit at load, 0.8 GB) is fastest but mishears jargon.
+    stt_model: str = "mlx-community/whisper-large-v3-turbo"
     # Spoken language for Whisper ("en", "zh", ...). None = auto-detect per 30 s window, which
     # is what produced Korean/Chinese garbage on silent windows.
     language: str | None = "en"
