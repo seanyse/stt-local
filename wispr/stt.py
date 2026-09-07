@@ -43,6 +43,14 @@ class SpeechToText:
         """audio: float32 mono at self.sample_rate."""
         if audio.size < self.sample_rate // 10:
             return ""
+        try:
+            return self._transcribe(audio)
+        finally:
+            # MLX keeps freed buffers cached (≈1 GB after Whisper). Give them back so the
+            # idle engine is mostly just weights and less likely to be paged out.
+            mx.clear_cache()
+
+    def _transcribe(self, audio: np.ndarray) -> str:
         if self.engine == "whisper":
             import mlx_whisper
 

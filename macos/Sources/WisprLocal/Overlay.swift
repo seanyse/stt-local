@@ -17,7 +17,7 @@ final class OverlayController {
 
     private func show(text: String, pulsing: Bool) {
         hideWork?.cancel()
-        model.text = text; model.pulsing = pulsing
+        model.text = text; model.pulsing = pulsing; model.visible = true
         if panel == nil { panel = makePanel() }
         position()
         panel?.orderFrontRegardless()
@@ -25,7 +25,7 @@ final class OverlayController {
 
     private func scheduleHide() {
         hideWork?.cancel()
-        let w = DispatchWorkItem { [weak self] in self?.panel?.orderOut(nil) }
+        let w = DispatchWorkItem { [weak self] in self?.panel?.orderOut(nil); self?.model.visible = false }
         hideWork = w
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: w)
     }
@@ -53,6 +53,7 @@ final class OverlayController {
 final class OverlayModel: ObservableObject {
     @Published var text = "Listening"
     @Published var pulsing = true
+    @Published var visible = false
 }
 
 struct OverlayView: View {
@@ -64,14 +65,15 @@ struct OverlayView: View {
             Circle()
                 .fill(model.pulsing ? Color.red : Color.orange)
                 .frame(width: 10, height: 10)
-                .scaleEffect(pulse && model.pulsing ? 1.35 : 1)
-                .opacity(pulse && model.pulsing ? 0.6 : 1)
-                .animation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true), value: pulse)
+                .scaleEffect(pulse ? 1.35 : 1)
+                .opacity(pulse ? 0.6 : 1)
+                .animation(pulse ? .easeInOut(duration: 0.7).repeatForever(autoreverses: true) : .default, value: pulse)
             Text(model.text).font(.system(size: 13, weight: .medium)).foregroundStyle(.white)
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
         .background(.black.opacity(0.82), in: Capsule())
         .frame(width: 200, height: 44)
-        .onAppear { pulse = true }
+        .onChange(of: model.visible) { _, v in pulse = v && model.pulsing }
+        .onChange(of: model.pulsing) { _, p in pulse = p && model.visible }
     }
 }

@@ -89,6 +89,18 @@ Measured on an M1 Pro (16 GB):
 | rule-based cleanup (no trigger) | ~0 ms | ~0 ms |
 | LLM pass when triggered (Qwen2.5 3B 4-bit) | ~300-500 ms | ~600-900 ms |
 
+## Resource cost of keeping the engine resident
+
+Measured on the M1 Pro with Whisper turbo loaded, idle between dictations:
+
+| | memory (phys footprint) | CPU idle |
+|---|---|---|
+| engine process, mic stream open | ~1.7 GB (weights 1.6 GB; was 2.6 GB before MLX's buffer cache was released after each call) | < 1% |
+| Parakeet v3 instead | ~1.3 GB weights, similar footprint | < 1% |
+| Swift app | ~55 MB | ~0% (was 5% while a hidden overlay kept animating) |
+
+CPU is a non-issue; memory is the cost. On a 16 GB machine under pressure the idle engine gets compressed or paged out, and the next dictation pays to bring it back: Whisper measured 0.72 s back-to-back, 1.3 s after 15 s idle, 2.3 s cold. `warm_on_start` fires a throwaway inference on key-down to absorb that while you speak; Parakeet is the option if the ~1 s matters more than jargon accuracy. Engine output is also written to `logs/engine.log`.
+
 ## Fixing mishearings
 
 Small local LLMs do not reliably repair misheard words ("L and pass" for "LLM pass"), even with a vocabulary hint; measured, Qwen2.5-3B made such sentences worse as often as better. What works, in order of cost:

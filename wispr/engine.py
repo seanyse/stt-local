@@ -30,10 +30,11 @@ def log(msg: str) -> None:
 
 
 class Engine:
-    def __init__(self, cfg: Config, on_status=lambda s: None, on_result=lambda r: None):
+    def __init__(self, cfg: Config, on_status=lambda s: None, on_result=lambda r: None, on_dropped=lambda reason: None):
         self.cfg = cfg
         self.on_status = on_status
         self.on_result = on_result
+        self.on_dropped = on_dropped
         self.jobs: queue.Queue = queue.Queue()
         self.ready = threading.Event()
         self.error: Exception | None = None
@@ -121,11 +122,16 @@ class Engine:
     def _process(self, audio: np.ndarray) -> None:
         seconds = len(audio) / self.cfg.sample_rate
         if seconds < 0.3 or is_silent(audio):
+            rms = float(np.sqrt(np.mean(audio**2))) if audio.size else 0.0
+            log(f"[dropped] {seconds:.1f}s of audio, rms {rms:.4f} (silent or too short)")
+            self.on_dropped("silent" if seconds >= 0.3 else "too short")
             return
         t0 = time.perf_counter()
         raw = self.stt.transcribe(audio)
         t_stt = time.perf_counter() - t0
         if not raw:
+            log(f"[dropped] {seconds:.1f}s of audio produced no text ({t_stt*1000:.0f}ms)")
+            self.on_dropped("no text")
             return
         text, t_fmt = format_transcript(
             self.formatter, raw, self.cfg.min_words_for_llm,

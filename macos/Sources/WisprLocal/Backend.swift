@@ -119,7 +119,16 @@ final class Backend: ObservableObject {
                 case "processing": status = .processing
                 default: status = .idle
                 }
-            case "result": if let e = HistoryEntry(json: obj) { onResult?(e) }
+            case "result":
+                if let e = HistoryEntry(json: obj) {
+                    let cfg = AppConfig(); // re-read so Settings changes apply immediately
+                    let mode = cfg.string("paste_mode", "clipboard")
+                    Paster.insert(e.clean, mode: mode)
+                    log("[app] inserted \(e.clean.count) chars via \(mode)")
+                    onResult?(e)
+                }
+            case "dropped":
+                log("[app] no speech detected (\(obj["reason"] as? String ?? "")) – if this keeps happening, check Microphone access for Wispr Local")
             case "error": status = .error(obj["message"] as? String ?? "unknown error")
             default: break
             }
