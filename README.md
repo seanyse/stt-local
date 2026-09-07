@@ -28,8 +28,8 @@ hold key ──► mic buffer ──► Whisper large-v3-turbo (MLX) ──► d
 - Settings: speech model, vocabulary, LLM pass and mode, personal dictionary, paste mode, audio saving, engine log and restart
 
 ```bash
-macos/build.sh                      # -> macos/dist/Wispr Local.app
-open "macos/dist/Wispr Local.app"
+macos/build.sh --install            # builds and copies to /Applications/Wispr Local.app
+open -a "Wispr Local"
 ```
 
 The bundle points at this repo's `.venv` and source (paths baked into its Info.plist), so keep the folder where it is or rebuild after moving it. On first launch grant **Accessibility** (hotkey + paste) and **Microphone** to "Wispr Local". The app is ad-hoc signed, so macOS may ask for Accessibility again after a rebuild. Quit the Python `./run.sh` front end before using the app, or both will react to the hotkey.

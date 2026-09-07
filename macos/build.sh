@@ -1,5 +1,6 @@
 #!/bin/zsh
-# Builds macos/dist/Wispr Local.app. The bundle points at this repo's .venv for the engine.
+# Builds macos/dist/Wispr Local.app; --install also copies it to /Applications.
+# The bundle points at this repo's .venv and source for the engine, so keep the repo in place.
 set -e
 cd "$(dirname "$0")"
 ROOT="$(cd .. && pwd)"
@@ -14,3 +15,13 @@ sed -e "s|__PYTHON__|$ROOT/.venv/bin/python|" -e "s|__BACKEND__|$ROOT|" Info.pli
 [ -f AppIcon.icns ] && cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 codesign --force --deep --sign - "$APP" 2>/dev/null || true
 echo "built: $(pwd)/$APP"
+
+# --install copies the bundle into /Applications (or ~/Applications if that is not writable).
+if [[ "$1" == "--install" ]]; then
+  DEST="/Applications"; [ -w "$DEST" ] || DEST="$HOME/Applications"
+  mkdir -p "$DEST"
+  osascript -e 'tell application "Wispr Local" to quit' 2>/dev/null || true
+  rm -rf "$DEST/Wispr Local.app"
+  cp -R "$APP" "$DEST/"
+  echo "installed: $DEST/Wispr Local.app"
+fi
