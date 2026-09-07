@@ -72,6 +72,17 @@ struct SettingsView: View {
                 }
             }
             Section("Output") {
+                HStack {
+                    Text(state.accessibilityGranted ? "Accessibility: granted" : "Accessibility: not granted – text will only be copied")
+                        .foregroundStyle(state.accessibilityGranted ? Color.secondary : Color.orange)
+                    Spacer()
+                    Button("Test paste in 3 s") {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                            Paster.insert("Wispr Local test paste ✓ ", mode: pasteMode)
+                            state.backend.log("[app] test paste → \(pasteMode) (trusted: \(AXIsProcessTrusted()), front app: \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "?"))")
+                        }
+                    }.help("Click, then switch to a text field within 3 seconds")
+                }
                 Picker("Insert text by", selection: $pasteMode) {
                     Text("Paste (Cmd+V, clipboard restored)").tag("clipboard")
                     Text("Typing keystrokes").tag("type")

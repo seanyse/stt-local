@@ -5,9 +5,9 @@ set -e
 cd "$(dirname "$0")"
 ROOT="$(cd .. && pwd)"
 APP="dist/Wispr Local.app"
-swift build -c release 2>&1 | grep -v "^\[" || true
+if ! swift build -c release 2>&1 | grep -v "^\["; then :; fi
+[ "${pipestatus[1]}" -eq 0 ] || { echo "build failed"; exit 1; }
 BIN=".build/release/WisprLocal"
-[ -x "$BIN" ] || { echo "build failed"; exit 1; }
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/WisprLocal"

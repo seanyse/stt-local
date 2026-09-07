@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 enum EngineStatus: Equatable {
@@ -91,7 +92,9 @@ final class Backend: ObservableObject {
         guard let p = process else { return }
         send(["cmd": "quit"])
         process = nil
-        DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) { if p.isRunning { p.terminate() } }
+        let deadline = Date().addingTimeInterval(1.5)
+        while p.isRunning && Date() < deadline { usleep(50_000) }
+        if p.isRunning { p.terminate() }
     }
 
     func send(_ msg: [String: Any]) {
@@ -122,9 +125,14 @@ final class Backend: ObservableObject {
             case "result":
                 if let e = HistoryEntry(json: obj) {
                     let cfg = AppConfig(); // re-read so Settings changes apply immediately
-                    let mode = cfg.string("paste_mode", "clipboard")
+                    var mode = cfg.string("paste_mode", "clipboard")
+                    let trusted = AXIsProcessTrusted()
+                    if !trusted && mode != "copy" && mode != "none" {
+                        mode = "copy"
+                        Notifier.show(title: "Copied to clipboard", body: "Grant Wispr Local Accessibility access to paste automatically.")
+                    }
                     Paster.insert(e.clean, mode: mode)
-                    log("[app] inserted \(e.clean.count) chars via \(mode)")
+                    log("[app] result \(e.clean.count) chars → \(mode) (accessibility trusted: \(trusted), front app: \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "?"))")
                     onResult?(e)
                 }
             case "dropped":
@@ -135,10 +143,20 @@ final class Backend: ObservableObject {
         }
     }
 
-    private func log(_ s: String) {
-        for l in s.split(separator: "\n") where !l.contains("it/s]") {
+    func log(_ s: String) {
+        for l in s.split(separator: "\n") where !l.contains("it/s]") && !l.contains("0.00B") {
             logLines.append(String(l))
+            Self.appendToFile(String(l))
         }
         if logLines.count > 400 { logLines.removeFirst(logLines.count - 400) }
+    }
+
+    private static let logFile = AppConfig.logsDir.appendingPathComponent("app.log")
+    private static func appendToFile(_ line: String) {
+        try? FileManager.default.createDirectory(at: AppConfig.logsDir, withIntermediateDirectories: true)
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        guard let d = (stamp + " " + line + "\n").data(using: .utf8) else { return }
+        if let h = try? FileHandle(forWritingTo: logFile) { h.seekToEndOfFile(); h.write(d); try? h.close() }
+        else { try? d.write(to: logFile) }
     }
 }

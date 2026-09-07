@@ -50,6 +50,17 @@ def main() -> None:
         emit(event="error", message=f"{type(e).__name__}: {e}")
         raise
     emit(event="ready")
+
+    parent = os.getppid()
+    def watch_parent():
+        import time
+        while True:
+            time.sleep(2)
+            if os.getppid() != parent:
+                log("[server] parent app exited, shutting down")
+                os._exit(0)
+    threading.Thread(target=watch_parent, daemon=True).start()
+
     for line in sys.stdin:
         line = line.strip()
         if not line:

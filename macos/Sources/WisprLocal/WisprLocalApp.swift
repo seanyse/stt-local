@@ -48,6 +48,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         state.backend.start()
         installHotkey()
+        if !state.accessibilityGranted {
+            Notifier.show(title: "Accessibility access needed",
+                          body: "System Settings → Privacy & Security → Accessibility → enable Wispr Local. Until then, text is only copied.", seconds: 8)
+        }
 
         statusSink = state.backend.$status.sink { [state] s in
             state.overlay.update(status: s)
@@ -55,7 +59,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Accessibility can be granted after launch; poll cheaply.
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [state] _ in
             let now = AXIsProcessTrusted()
-            if now != state.accessibilityGranted { state.accessibilityGranted = now }
+            if now != state.accessibilityGranted {
+                state.accessibilityGranted = now
+                state.backend.log("[app] accessibility trusted: \(now)")
+                if now { Notifier.show(title: "Accessibility granted", body: "Dictations will now be pasted into the focused app.") }
+            }
         }
     }
 
