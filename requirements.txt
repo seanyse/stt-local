@@ -1,0 +1,12 @@
+mlx
+mlx-lm
+parakeet-mlx
+sounddevice
+numpy
+pynput
+pyobjc-framework-Quartz
+pyobjc-framework-Cocoa
+rumps
+anthropic
+huggingface_hub
+mlx-whisper
