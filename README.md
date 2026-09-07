@@ -12,7 +12,9 @@ hold key ──► mic buffer ──► Whisper large-v3-turbo (MLX) ──► d
 ```
 
 1. **Audio** – the mic stream is always open (`wispr/audio.py`), so pressing the key costs nothing; samples are only buffered while the key is held.
-2. **Speech-to-text** – Whisper large-v3-turbo via `mlx-whisper`, prompted with your `vocabulary`. Measured on real recordings it beat Parakeet on jargon ("text-to-speech", "DeepMind") and drops fillers by itself, at a flat ~0.9 s per dictation on an M1 Pro. Switch `stt_model` to `mlx-community/parakeet-tdt-0.6b-v3` for ~150 ms on short clips if you rarely dictate names or jargon.
+2. **Speech-to-text** – Whisper large-v3-turbo **4-bit** via `mlx-whisper` (0.6 GB), prompted with your `vocabulary`, language forced, cross-window conditioning and temperature fallback off, and repetitive segments dropped. Those last three matter: on a recording with a silent tail the stock settings hallucinated a 20x repeated phrase, retried at higher temperatures for 15 s, and drifted into Korean/Chinese tokens. Alternative: `mlx-community/parakeet-tdt-0.6b-v3`, quantized to 8-bit at load (0.8 GB), ~20 ms per second of audio, weaker on jargon.
+
+   **Transcribe while talking** (`segment_while_recording`): every 250 ms the engine looks at the audio so far and hands each finished phrase (a ≥ 0.6 s pause, or 25 s without one) to the model in the background. On release only the last phrase is left, so the wait is the same for a 5 s and a 5 minute dictation. Measured with real recordings replayed in real time: 31 s clip → 3 ms wait (Whisper) / 14 ms (Parakeet); 78 s → 0.8 s / 0.2 s.
 3. **Formatting pass** – off by default (`formatter: "none"`): the personal dictionary (`replacements`) and a rule-based cleanup (fillers, doubled words) run on every dictation at no cost. With `formatter` set to `local` or `claude`, `llm_mode: "triggers"` means the model runs only when the transcript contains a self-correction or formatting phrase. The LLM runs only when the transcript contains a self-correction or formatting phrase such as "no wait", "actually", "scratch that", "I mean", "new line" – the cases where it earns its latency. It then applies the correction ("bacon, actually not bacon, pancakes" → "pancakes"), fixes misheard words from context, and handles line breaks. Set `llm_mode` to `always` or `never` to change that. The system prompt lives in a pre-computed KV cache so each request only pays for the transcript tokens, and outputs that look like the model *answered* the dictation are rejected in favour of the rule-based cleanup.
 
    Local model choice, measured on an 11-case eval built from real dictations: Qwen2.5-3B-Instruct 4-bit scores 9/11 at ~500 ms, Qwen2.5-1.5B 8/11 at ~400 ms. The two misses need world knowledge ("Texas speech" → "text to speech"); for those, switch `formatter` to `claude`.
@@ -66,7 +68,9 @@ The menu-bar icon shows 🎙 idle, 🔴 recording, ⏳ processing.
 | `claude_model` | `claude-opus-5` | used when `formatter` is `claude`; export `ANTHROPIC_API_KEY` first. Runs at low effort with server-side refusal fallback. |
 | `vocabulary` | `[]` | names and jargon, e.g. `["Wispr Flow", "Parakeet", "MLX"]`; given to the LLM, and to Whisper as its prompt |
 | `replacements` | a few seeds | personal dictionary, exact phrase → replacement, applied to every dictation before anything else |
-| `stt_model` | `mlx-community/whisper-large-v3-turbo` | or `mlx-community/parakeet-tdt-0.6b-v3`: much faster on short clips, worse on jargon |
+| `stt_model` | `mlx-community/whisper-large-v3-turbo-4bit` | `-8bit`, plain fp16, or `mlx-community/parakeet-tdt-0.6b-v3` (8-bit at load, fastest, worse on jargon) |
+| `language` | `en` | Whisper language; blank = auto-detect per window (caused Korean/Chinese garbage on silence) |
+| `segment_while_recording` | `true` | transcribe finished phrases in the background while talking |
 | `save_audio` | `true` | keep a wav of every dictation in the logs folder, for tuning speech-to-text on your own voice |
 | `min_words_for_llm` | `4` | shorter utterances skip the LLM |
 | `paste_mode` | `clipboard` | `clipboard` (paste + restore), `type`, `copy` (clipboard only), `none` |
@@ -84,8 +88,9 @@ Measured on an M1 Pro (16 GB):
 
 | stage | 3 s utterance | 10 s utterance |
 |---|---|---|
-| speech-to-text, Whisper turbo | ~0.8 s | ~0.9 s |
-| speech-to-text, Parakeet v3 | ~140 ms | ~290 ms |
+| speech-to-text, Whisper turbo 4-bit, one shot | ~0.8 s | ~0.9 s |
+| speech-to-text, Parakeet v3 8-bit, one shot | ~140 ms | ~290 ms |
+| wait after release with transcribe-while-talking, any length | last phrase only: ~0.8 s Whisper / ~0.2 s Parakeet | same |
 | rule-based cleanup (no trigger) | ~0 ms | ~0 ms |
 | LLM pass when triggered (Qwen2.5 3B 4-bit) | ~300-500 ms | ~600-900 ms |
 
@@ -95,8 +100,10 @@ Measured on the M1 Pro with Whisper turbo loaded, idle between dictations:
 
 | | memory (phys footprint) | CPU idle |
 |---|---|---|
-| engine process, mic stream open | ~1.7 GB (weights 1.6 GB; was 2.6 GB before MLX's buffer cache was released after each call) | < 1% |
-| Parakeet v3 instead | ~1.3 GB weights, similar footprint | < 1% |
+| engine, Whisper turbo 4-bit (default) | ~0.65 GB | < 1% |
+| engine, Whisper turbo 8-bit | ~0.9 GB | < 1% |
+| engine, Parakeet v3 8-bit | ~0.8 GB | < 1% |
+| engine, Whisper turbo fp16 (old default) | ~1.7 GB | < 1% |
 | Swift app | ~55 MB | ~0% (was 5% while a hidden overlay kept animating) |
 
 CPU is a non-issue; memory is the cost. On a 16 GB machine under pressure the idle engine gets compressed or paged out, and the next dictation pays to bring it back: Whisper measured 0.72 s back-to-back, 1.3 s after 15 s idle, 2.3 s cold. `warm_on_start` fires a throwaway inference on key-down to absorb that while you speak; Parakeet is the option if the ~1 s matters more than jargon accuracy. Engine output is also written to `logs/engine.log`.

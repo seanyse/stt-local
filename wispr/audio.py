@@ -43,6 +43,13 @@ class Recorder:
     def recording(self) -> bool:
         return self._recording
 
+    def snapshot(self) -> np.ndarray:
+        """Everything captured so far in the current recording (copy); recording continues."""
+        with self._lock:
+            if not self._chunks:
+                return np.zeros(0, dtype=np.float32)
+            return np.concatenate(self._chunks)
+
     def stop(self) -> np.ndarray:
         with self._lock:
             self._recording = False

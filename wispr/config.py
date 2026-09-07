@@ -23,10 +23,18 @@ class Config:
     # time you release it (Whisper was ~0.5 s slower after a few seconds of idle).
     warm_on_start: bool = True
 
-    # Whisper turbo: ~0.9 s flat per dictation, drops fillers itself, and is prompted with
-    # `vocabulary` so it spells jargon and names right. "mlx-community/parakeet-tdt-0.6b-v3"
-    # is ~150 ms for short clips but mishears jargon more often.
-    stt_model: str = "mlx-community/whisper-large-v3-turbo"
+    # Whisper turbo 4-bit: 0.6 GB, ~0.8 s per phrase, best on names/jargon, prompted with
+    # `vocabulary`. "mlx-community/parakeet-tdt-0.6b-v3" (8-bit): 0.8 GB, ~20 ms per second
+    # of audio, mishears jargon more often.
+    stt_model: str = "mlx-community/whisper-large-v3-turbo-4bit"
+    # Spoken language for Whisper ("en", "zh", ...). None = auto-detect per 30 s window, which
+    # is what produced Korean/Chinese garbage on silent windows.
+    language: str | None = "en"
+    # Quantize Parakeet's linear layers at load: 8 = same transcripts as bf16 at ~60% memory.
+    stt_quant_bits: int | None = 8
+    # Transcribe finished phrases in the background while you are still talking, so the wait
+    # after release is only the last phrase, however long the dictation.
+    segment_while_recording: bool = True
 
     # Which model runs the LLM pass: "local" (mlx-lm), "claude" (Anthropic API), or "none".
     # Default is none: with Whisper the transcript is already clean, and the local 3B model

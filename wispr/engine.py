@@ -29,6 +29,29 @@ def log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
+def _find_pause_cut(seg: np.ndarray, sr: int, min_len: int, pause_s: float = 0.6, hop_s: float = 0.05) -> int | None:
+    """Sample index in `seg` at the middle of the last >= pause_s quiet stretch that starts
+    after min_len samples, or None. Quiet = frame RMS below ~2.5x the noise floor."""
+    hop = int(hop_s * sr)
+    n = len(seg) // hop
+    if n < 4:
+        return None
+    frames = seg[: n * hop].reshape(n, hop)
+    rms = np.sqrt(np.mean(frames**2, axis=1))
+    thresh = max(0.0035, 2.5 * float(np.percentile(rms, 20)))
+    quiet = rms < thresh
+    need = int(pause_s / hop_s)
+    best = None
+    run = 0
+    for i, q in enumerate(quiet):
+        run = run + 1 if q else 0
+        if run >= need:
+            start = (i - run + 1) * hop
+            if start >= min_len:
+                best = start + (run * hop) // 2
+    return best
+
+
 class Engine:
     def __init__(self, cfg: Config, on_status=lambda s: None, on_result=lambda r: None, on_dropped=lambda reason: None):
         self.cfg = cfg
@@ -41,6 +64,12 @@ class Engine:
         os.makedirs(os.path.expanduser(cfg.log_dir), exist_ok=True)
 
         self.recorder = Recorder(cfg.sample_rate, cfg.max_seconds)
+        # Per-utterance state for transcribe-while-talking (see _segmenter).
+        self._utt = 0             # utterance id; jobs from an older utterance are ignored
+        self._seg_lock = threading.Lock()
+        self._consumed = 0        # samples already handed to the worker
+        self._segments: list[str] = []
+        self._seg_ms = 0.0
         self.worker = threading.Thread(target=self._worker, daemon=True)
         self.worker.start()
         self.ready.wait()
@@ -50,19 +79,55 @@ class Engine:
 
     # -- public, callable from any thread --------------------------------------------
     def start(self) -> None:
+        with self._seg_lock:
+            self._utt += 1
+            self._consumed = 0
+            self._segments = []
+            self._seg_ms = 0.0
+            utt = self._utt
         self.recorder.start()
         self.on_status(REC)
-        if self.cfg.warm_on_start:
-            self.jobs.put(("warm", None))  # spin the GPU up while the user is talking
+        if self.cfg.segment_while_recording:
+            threading.Thread(target=self._segmenter, args=(utt,), daemon=True).start()
+        elif self.cfg.warm_on_start:
+            self.jobs.put(("warm", utt, None))  # spin the GPU up while the user is talking
 
     def stop(self) -> None:
-        audio = self.recorder.stop()
+        with self._seg_lock:
+            audio = self.recorder.stop()
+            utt = self._utt
+            tail = audio[self._consumed:]
         self.on_status(BUSY)
-        self.jobs.put(("audio", audio))
+        self.jobs.put(("final", utt, (audio, tail)))
 
     def cancel(self) -> None:
-        self.recorder.stop()
+        with self._seg_lock:
+            self.recorder.stop()
+            self._utt += 1  # orphan any queued segment jobs
         self.on_status(IDLE)
+
+    # -- transcribe while talking -------------------------------------------------------
+    def _segmenter(self, utt: int) -> None:
+        """Every 250 ms, look at the audio captured so far; whenever a phrase has ended
+        (>= 0.6 s pause) hand it to the worker. Also cuts at 25 s if the speaker never pauses."""
+        sr = self.cfg.sample_rate
+        min_len, max_len = 3 * sr, 25 * sr
+        while True:
+            time.sleep(0.25)
+            with self._seg_lock:
+                if utt != self._utt or not self.recorder.recording:
+                    return
+                audio = self.recorder.snapshot()
+                seg = audio[self._consumed:]
+                if len(seg) < min_len:
+                    continue
+                cut = _find_pause_cut(seg, sr, min_len)
+                if cut is None and len(seg) >= max_len:
+                    cut = max_len
+                if cut is None:
+                    continue
+                self.jobs.put(("segment", utt, seg[:cut].copy()))
+                self._consumed += cut
 
     def transcribe_file(self, path: str) -> None:
         """Debug helper: run the pipeline on a wav (16 kHz mono int16) instead of the mic."""
@@ -70,16 +135,22 @@ class Engine:
 
         with wave.open(path) as w:
             pcm = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
+        audio = pcm.astype(np.float32) / 32768.0
+        with self._seg_lock:
+            self._utt += 1
+            self._segments = []
+            self._seg_ms = 0.0
+            utt = self._utt
         self.on_status(BUSY)
-        self.jobs.put(("audio", pcm.astype(np.float32) / 32768.0))
+        self.jobs.put(("final", utt, (audio, audio)))
 
     def reload(self, cfg: Config, on_done=lambda: None) -> None:
-        self.jobs.put(("reload", (cfg, on_done)))
+        self.jobs.put(("reload", 0, (cfg, on_done)))
 
     # -- worker ------------------------------------------------------------------------
     def _load(self) -> None:
         t = time.perf_counter()
-        self.stt = SpeechToText(self.cfg.stt_model, self.cfg.vocabulary)
+        self.stt = SpeechToText(self.cfg.stt_model, self.cfg.vocabulary, self.cfg.language, self.cfg.stt_quant_bits)
         log(f"[init] speech-to-text ready in {time.perf_counter() - t:.1f}s")
         t = time.perf_counter()
         self.formatter = build_formatter(self.cfg)
@@ -94,10 +165,19 @@ class Engine:
             return
         self.ready.set()
         while True:
-            kind, payload = self.jobs.get()
+            kind, utt, payload = self.jobs.get()
+            if kind in ("segment", "final", "warm") and utt != self._utt:
+                continue  # cancelled or superseded utterance
             try:
-                if kind == "audio":
-                    self._process(payload)
+                if kind == "segment":
+                    t = time.perf_counter()
+                    text = "" if is_silent(payload) else self.stt.transcribe(payload)
+                    self._seg_ms += (time.perf_counter() - t) * 1000
+                    if text:
+                        self._segments.append(text)
+                elif kind == "final":
+                    audio, tail = payload
+                    self._process(audio, tail)
                 elif kind == "warm":
                     if self.recorder.recording:
                         self.stt.transcribe(np.zeros(self.stt.sample_rate, dtype=np.float32))
@@ -105,8 +185,12 @@ class Engine:
                     cfg, on_done = payload
                     old = self.cfg
                     self.cfg = cfg
-                    if cfg.stt_model != old.stt_model or cfg.vocabulary != old.vocabulary:
-                        self.stt = SpeechToText(cfg.stt_model, cfg.vocabulary)
+                    if (cfg.stt_model, cfg.vocabulary, cfg.language, cfg.stt_quant_bits) != (
+                        old.stt_model, old.vocabulary, old.language, old.stt_quant_bits
+                    ):
+                        self.stt = None
+                        import gc; gc.collect(); import mlx.core as mx; mx.clear_cache()
+                        self.stt = SpeechToText(cfg.stt_model, cfg.vocabulary, cfg.language, cfg.stt_quant_bits)
                     if (cfg.formatter, cfg.llm_model, cfg.claude_model, cfg.vocabulary) != (
                         old.formatter, old.llm_model, old.claude_model, old.vocabulary
                     ):
@@ -116,19 +200,23 @@ class Engine:
             except Exception as e:
                 log(f"[error] {type(e).__name__}: {e}")
             finally:
-                if kind != "warm" and not self.recorder.recording:
+                if kind in ("final", "reload") and not self.recorder.recording:
                     self.on_status(IDLE)
 
-    def _process(self, audio: np.ndarray) -> None:
+    def _process(self, audio: np.ndarray, tail: np.ndarray) -> None:
+        """`audio` is the whole recording (for the wav); `tail` is the part not yet transcribed."""
         seconds = len(audio) / self.cfg.sample_rate
-        if seconds < 0.3 or is_silent(audio):
+        if seconds < 0.3 or (is_silent(audio) and not self._segments):
             rms = float(np.sqrt(np.mean(audio**2))) if audio.size else 0.0
             log(f"[dropped] {seconds:.1f}s of audio, rms {rms:.4f} (silent or too short)")
             self.on_dropped("silent" if seconds >= 0.3 else "too short")
             return
         t0 = time.perf_counter()
-        raw = self.stt.transcribe(audio)
+        tail_text = "" if is_silent(tail) else self.stt.transcribe(tail)
         t_stt = time.perf_counter() - t0
+        raw = " ".join(self._segments + ([tail_text] if tail_text else [])).strip()
+        if self._segments:
+            log(f"[segments] {len(self._segments)} phrase(s) transcribed while talking ({self._seg_ms:.0f}ms), tail {len(tail)/self.cfg.sample_rate:.1f}s")
         if not raw:
             log(f"[dropped] {seconds:.1f}s of audio produced no text ({t_stt*1000:.0f}ms)")
             self.on_dropped("no text")
@@ -147,6 +235,7 @@ class Engine:
         row = dict(
             ts=datetime.now().isoformat(timespec="seconds"), audio_seconds=round(seconds, 2), raw=raw, clean=text,
             stt_ms=round(t_stt * 1000), format_ms=round(t_fmt * 1000), total_ms=round(total * 1000),
+            segments=len(self._segments), background_stt_ms=round(self._seg_ms),
             formatter=self.formatter.name, stt_model=self.cfg.stt_model, wav=wav,
         )
         with open(os.path.join(os.path.expanduser(self.cfg.log_dir), "history.jsonl"), "a") as f:

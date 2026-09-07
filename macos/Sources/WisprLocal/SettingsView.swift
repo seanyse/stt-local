@@ -18,6 +18,8 @@ struct SettingsView: View {
     @State private var saveAudio = true
     @State private var warmOnStart = true
     @State private var vocabulary = ""
+    @State private var language = "en"
+    @State private var segmentWhileRecording = true
     @State private var replacements = ""
     @State private var minWords = 4
 
@@ -44,11 +46,17 @@ struct SettingsView: View {
             }
             Section("Speech to text") {
                 Picker("Model", selection: $sttModel) {
-                    Text("Whisper large-v3-turbo (accurate, ~1 s)").tag("mlx-community/whisper-large-v3-turbo")
-                    Text("Parakeet TDT 0.6B v3 (fast, ~0.2 s)").tag("mlx-community/parakeet-tdt-0.6b-v3")
-                    Text("Parakeet TDT 0.6B v2 (English only)").tag("mlx-community/parakeet-tdt-0.6b-v2")
+                    Text("Whisper turbo 4-bit – 0.6 GB, best on names/jargon").tag("mlx-community/whisper-large-v3-turbo-4bit")
+                    Text("Whisper turbo 8-bit – 0.9 GB").tag("mlx-community/whisper-large-v3-turbo-8bit")
+                    Text("Whisper turbo fp16 – 1.6 GB").tag("mlx-community/whisper-large-v3-turbo")
+                    Text("Parakeet v3 8-bit – 0.8 GB, fastest, weaker on jargon").tag("mlx-community/parakeet-tdt-0.6b-v3")
+                    Text("Parakeet v2 8-bit – English only").tag("mlx-community/parakeet-tdt-0.6b-v2")
                 }
+                TextField("Language code for Whisper (en, zh, ko … blank = auto-detect)", text: $language)
                 TextField("Vocabulary (comma separated names and jargon)", text: $vocabulary)
+                Toggle("Transcribe phrases while I'm still talking", isOn: $segmentWhileRecording)
+                Text("Finished phrases are transcribed in the background, so the wait after release is only the last phrase however long you talk.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Toggle("Warm up the GPU when the key goes down", isOn: $warmOnStart)
             }
             Section("Cleanup") {
@@ -114,8 +122,8 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 560)
         .onAppear(perform: loadFields)
-        .onChange(of: [sttModel, formatter, llmMode, llmModel, claudeModel, pasteMode, vocabulary, replacements]) { _, _ in markDirty() }
-        .onChange(of: [saveAudio, warmOnStart]) { _, _ in markDirty() }
+        .onChange(of: [sttModel, formatter, llmMode, llmModel, claudeModel, pasteMode, vocabulary, replacements, language]) { _, _ in markDirty() }
+        .onChange(of: [saveAudio, warmOnStart, segmentWhileRecording]) { _, _ in markDirty() }
         .onChange(of: minWords) { _, _ in markDirty() }
     }
 
@@ -134,7 +142,9 @@ struct SettingsView: View {
 
     private func loadFields() {
         let c = state.config
-        sttModel = c.string("stt_model", "mlx-community/whisper-large-v3-turbo")
+        sttModel = c.string("stt_model", "mlx-community/whisper-large-v3-turbo-4bit")
+        language = c.string("language", "en")
+        segmentWhileRecording = c.bool("segment_while_recording", true)
         formatter = c.string("formatter", "none")
         llmMode = c.string("llm_mode", "triggers")
         llmModel = c.string("llm_model", "mlx-community/Qwen2.5-3B-Instruct-4bit")
@@ -153,6 +163,9 @@ struct SettingsView: View {
         c.set("stt_model", sttModel); c.set("formatter", formatter); c.set("llm_mode", llmMode)
         c.set("llm_model", llmModel); c.set("claude_model", claudeModel); c.set("paste_mode", pasteMode)
         c.set("save_audio", saveAudio); c.set("warm_on_start", warmOnStart); c.set("min_words_for_llm", minWords)
+        c.set("segment_while_recording", segmentWhileRecording)
+        let lang = language.trimmingCharacters(in: .whitespaces)
+        c.raw["language"] = lang.isEmpty ? NSNull() : lang
         c.set("vocabulary", vocabulary.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
         var dict: [String: String] = [:]
         for line in replacements.split(separator: "\n") {
