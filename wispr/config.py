@@ -72,6 +72,10 @@ class Config:
         "Texas speech": "text to speech",
         "Dennis Hassabis": "Demis Hassabis",
     })
+    # macOS app: lower the system output volume while dictating when something is playing,
+    # to this fraction of the current level; restored afterwards.
+    duck_audio: bool = True
+    duck_level: float = 0.2
     # Save each recording as a wav next to the history log (for building an STT eval
     # from your own voice). ~2 MB per minute of speech.
     save_audio: bool = True

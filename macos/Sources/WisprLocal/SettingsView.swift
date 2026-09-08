@@ -20,6 +20,8 @@ struct SettingsView: View {
     @State private var vocabulary = ""
     @State private var language = "en"
     @State private var segmentWhileRecording = true
+    @State private var duckAudio = true
+    @State private var duckLevel = 0.2
     @State private var replacements = ""
     @State private var minWords = 4
 
@@ -97,6 +99,14 @@ struct SettingsView: View {
                     Text("Copy to clipboard only").tag("copy")
                 }
                 Toggle("Keep a recording of each dictation (logs folder)", isOn: $saveAudio)
+                Toggle("Lower speaker volume while dictating if something is playing", isOn: $duckAudio)
+                if duckAudio {
+                    HStack {
+                        Text("Duck to")
+                        Slider(value: $duckLevel, in: 0...0.8, step: 0.05)
+                        Text("\(Int(duckLevel * 100))% of current").frame(width: 110, alignment: .trailing)
+                    }
+                }
             }
             Section("Engine") {
                 HStack {
@@ -123,7 +133,8 @@ struct SettingsView: View {
         .frame(width: 560)
         .onAppear(perform: loadFields)
         .onChange(of: [sttModel, formatter, llmMode, llmModel, claudeModel, pasteMode, vocabulary, replacements, language]) { _, _ in markDirty() }
-        .onChange(of: [saveAudio, warmOnStart, segmentWhileRecording]) { _, _ in markDirty() }
+        .onChange(of: [saveAudio, warmOnStart, segmentWhileRecording, duckAudio]) { _, _ in markDirty() }
+        .onChange(of: duckLevel) { _, _ in markDirty() }
         .onChange(of: minWords) { _, _ in markDirty() }
     }
 
@@ -145,6 +156,8 @@ struct SettingsView: View {
         sttModel = c.string("stt_model", "mlx-community/whisper-large-v3-turbo")
         language = c.string("language", "en")
         segmentWhileRecording = c.bool("segment_while_recording", true)
+        duckAudio = c.bool("duck_audio", true)
+        duckLevel = c.raw["duck_level"] as? Double ?? 0.2
         formatter = c.string("formatter", "none")
         llmMode = c.string("llm_mode", "triggers")
         llmModel = c.string("llm_model", "mlx-community/Qwen2.5-3B-Instruct-4bit")
@@ -164,6 +177,7 @@ struct SettingsView: View {
         c.set("llm_model", llmModel); c.set("claude_model", claudeModel); c.set("paste_mode", pasteMode)
         c.set("save_audio", saveAudio); c.set("warm_on_start", warmOnStart); c.set("min_words_for_llm", minWords)
         c.set("segment_while_recording", segmentWhileRecording)
+        c.set("duck_audio", duckAudio); c.set("duck_level", duckLevel)
         let lang = language.trimmingCharacters(in: .whitespaces)
         c.raw["language"] = lang.isEmpty ? NSNull() : lang
         c.set("vocabulary", vocabulary.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })

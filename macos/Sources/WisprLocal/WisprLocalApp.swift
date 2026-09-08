@@ -37,6 +37,7 @@ final class AppState: ObservableObject {
     @Published var accessibilityGranted = AXIsProcessTrusted()
     var hotkey: HotkeyMonitor?
     let overlay = OverlayController()
+    let ducker = AudioDucker()
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -61,6 +62,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusSink = state.backend.$status.sink { [state] s in
             state.overlay.update(status: s)
+            switch s {
+            case .recording:
+                if state.config.bool("duck_audio", true) {
+                    let level = Float32(state.config.raw["duck_level"] as? Double ?? 0.2)
+                    state.backend.log("[app] " + state.ducker.duck(to: level))
+                }
+            case .idle, .error, .stopped:
+                if let m = state.ducker.restore() { state.backend.log("[app] " + m) }
+            default: break
+            }
         }
         // Accessibility can be granted after launch; poll cheaply.
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [state] _ in

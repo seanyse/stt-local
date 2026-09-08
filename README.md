@@ -30,6 +30,7 @@ hold key ──► mic buffer ──► Whisper large-v3-turbo (MLX) ──► d
 - Wispr-style floating "Listening / Transcribing" pill at the bottom of the screen
 - History window: every dictation with timestamp and timing, copy button, play the saved recording, reveal the wav, show the raw transcript, search
 - Settings: speech model, vocabulary, LLM pass and mode, personal dictionary, paste mode, audio saving, engine log and restart
+- Audio ducking: if anything is playing through the output device when you press the key, the system volume is lowered (default to 20% of current) and restored when the dictation is done; left alone if you changed the volume meanwhile
 
 ```bash
 macos/build.sh --install            # builds and copies to /Applications/Wispr Local.app
