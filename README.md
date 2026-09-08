@@ -11,7 +11,7 @@ hold key ──► mic buffer ──► Whisper large-v3-turbo (MLX) ──► d
                             speech-to-text, ~0.9 s flat         ~0 ms  /  ~300-900 ms
 ```
 
-1. **Audio** – the mic stream is always open (`wispr/audio.py`), so pressing the key costs nothing; samples are only buffered while the key is held.
+1. **Audio** – the mic stream is opened when you press the key and closed on release (`wispr/audio.py`), so the macOS microphone indicator shows only while dictating. Opening costs ~100 ms before the first samples arrive, less than the usual gap before you start speaking. `mic_always_open` keeps it open permanently instead.
 2. **Speech-to-text** – Whisper large-v3-turbo via `mlx-whisper` (fp16, 1.7 GB; the 8-bit and 4-bit variants gave near-identical text at 0.9 / 0.6 GB), prompted with your `vocabulary`, language forced, cross-window conditioning and temperature fallback off, and repetitive segments dropped. Those last three matter: on a recording with a silent tail the stock settings hallucinated a 20x repeated phrase, retried at higher temperatures for 15 s, and drifted into Korean/Chinese tokens. Alternative: `mlx-community/parakeet-tdt-0.6b-v3`, quantized to 8-bit at load (0.8 GB), ~20 ms per second of audio, weaker on jargon.
 
    Accuracy comparison on 12 real recordings (184 s): turbo was the most accurate; the full `whisper-large-v3` was worse ("Texas beach", "She crashed a movie") at 2x the time, Parakeet was worst on jargon, and gain-normalizing the quiet mic signal changed nothing.
@@ -103,7 +103,7 @@ Measured on the M1 Pro with Whisper turbo loaded, idle between dictations:
 
 | | memory (phys footprint) | CPU idle |
 |---|---|---|
-| engine, Whisper turbo fp16 (default, most accurate) | ~1.7 GB | < 1% |
+| engine, Whisper turbo fp16 (default, most accurate), mic closed at idle | ~1.7 GB | ~0% |
 | engine, Whisper turbo 8-bit | ~0.9 GB | < 1% |
 | engine, Whisper turbo 4-bit | ~0.65 GB | < 1% |
 | engine, Parakeet v3 8-bit | ~0.8 GB | < 1% |

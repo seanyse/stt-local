@@ -1,4 +1,11 @@
-"""Always-open microphone stream; buffers samples only while recording."""
+"""Microphone capture.
+
+By default the input stream is opened when recording starts and closed when it stops, so
+macOS shows the microphone-in-use indicator only while you hold the key. Opening costs
+~100 ms before the first samples arrive (measured), which is shorter than the usual gap
+between pressing the key and starting to speak. `always_open=True` keeps the stream open
+permanently instead (zero start-up cost, but the orange mic dot stays on).
+"""
 from __future__ import annotations
 
 import threading
@@ -8,22 +15,34 @@ import sounddevice as sd
 
 
 class Recorder:
-    def __init__(self, sample_rate: int = 16000, max_seconds: int = 180):
+    def __init__(self, sample_rate: int = 16000, max_seconds: int = 180, always_open: bool = False):
         self.sample_rate = sample_rate
         self.max_samples = sample_rate * max_seconds
+        self.always_open = always_open
         self._chunks: list[np.ndarray] = []
         self._n = 0
         self._recording = False
         self._lock = threading.Lock()
-        # Keeping the stream open avoids ~100ms+ of device start-up latency per utterance.
+        self._stream: sd.InputStream | None = None
+        if always_open:
+            self._open()
+
+    def _open(self) -> None:
+        if self._stream is not None:
+            return
         self._stream = sd.InputStream(
-            samplerate=sample_rate,
-            channels=1,
-            dtype="float32",
-            blocksize=0,
-            callback=self._callback,
+            samplerate=self.sample_rate, channels=1, dtype="float32", blocksize=0, callback=self._callback,
         )
         self._stream.start()
+
+    def _close(self) -> None:
+        s, self._stream = self._stream, None
+        if s is not None:
+            try:
+                s.stop()
+                s.close()
+            except Exception:
+                pass
 
     def _callback(self, indata, frames, time_info, status):
         if not self._recording:
@@ -38,6 +57,7 @@ class Recorder:
             self._chunks = []
             self._n = 0
             self._recording = True
+        self._open()
 
     @property
     def recording(self) -> bool:
@@ -53,16 +73,16 @@ class Recorder:
     def stop(self) -> np.ndarray:
         with self._lock:
             self._recording = False
-            if not self._chunks:
-                return np.zeros(0, dtype=np.float32)
-            audio = np.concatenate(self._chunks)
+            audio = np.concatenate(self._chunks) if self._chunks else np.zeros(0, dtype=np.float32)
             self._chunks = []
             self._n = 0
+        if not self.always_open:
+            self._close()
         return audio
 
     def close(self) -> None:
-        self._stream.stop()
-        self._stream.close()
+        self._recording = False
+        self._close()
 
 
 def is_silent(audio: np.ndarray, threshold: float = 0.004) -> bool:

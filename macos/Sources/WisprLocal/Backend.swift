@@ -83,6 +83,10 @@ final class Backend: ObservableObject {
                 guard let self, self.process === proc else { return }
                 self.status = proc.terminationStatus == 0 ? .stopped : .error("engine exited (\(proc.terminationStatus)) – see log")
                 self.process = nil
+                self.log("[app] engine exited with status \(proc.terminationStatus); restarting in 2 s")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                    if let self, self.process == nil { self.start() }
+                }
             }
         }
         do { try p.run(); process = p } catch { status = .error("cannot launch \(Self.pythonPath): \(error.localizedDescription)") }

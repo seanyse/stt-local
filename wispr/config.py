@@ -57,6 +57,9 @@ class Config:
     # (synthesize keystrokes; slower for long text but leaves the clipboard alone)
     paste_mode: str = "clipboard"
 
+    # Keep the mic stream open permanently (zero start-up cost, but macOS shows the
+    # microphone indicator all the time). Default opens it only while the key is held.
+    mic_always_open: bool = False
     sample_rate: int = 16000
     max_seconds: int = 180
     log_dir: str = os.path.join(CONFIG_DIR, "logs")

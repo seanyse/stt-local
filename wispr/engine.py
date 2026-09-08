@@ -76,7 +76,7 @@ class Engine:
         self.error: Exception | None = None
         os.makedirs(os.path.expanduser(cfg.log_dir), exist_ok=True)
 
-        self.recorder = Recorder(cfg.sample_rate, cfg.max_seconds)
+        self.recorder = Recorder(cfg.sample_rate, cfg.max_seconds, cfg.mic_always_open)
         # Per-utterance state for transcribe-while-talking (see _segmenter).
         self._utt = 0             # utterance id; jobs from an older utterance are ignored
         self._seg_lock = threading.Lock()
